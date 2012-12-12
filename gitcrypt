@@ -3,17 +3,18 @@
 readonly VERSION="0.3.0"
 readonly DEFAULT_CIPHER="aes-256-ecb"
 
+OPTION_YES=0       # With -y, accept the defaults in all prompts.
+
 init_config() {
+
 	local answer
 	while [ 1 ]; do
 		while [ -z "$SALT" ]; do
-			echo -n "Generate a random salt? [Y/n] "
-			read answer
+			answer=$(prompt "Generate a random salt? [Y/n]" Y)
 
 			case "$answer" in
 				n*|N*)
-					echo -n "Shared salt as hex characters: "
-					read SALT
+					SALT=$(prompt "Shared salt as hex characters:" "")
 
 					if [ $(echo "$SALT" | grep '[^a-f0-9]' | wc -l) -ne 0 ]; then
 						echo "Error: non-hex characters in salt"
@@ -28,13 +29,11 @@ init_config() {
 		done
 
 		while [ -z "$PASS" ]; do
-			echo -n "Generate a random password? [Y/n]"
-			read answer
+			answer=$(prompt "Generate a random password? [Y/n]" Y)
 
 			case "$answer" in
 				n*|N*)
-					echo -n "Enter your passphrase: "
-					read PASS
+					PASS=$(prompt "Enter your passphrase:" "")
 					;;
 				*)
 					PASS=$(cat /dev/urandom | tr -dc '!@#$%^&*()_A-Z-a-z-0-9' | head -c32)
@@ -42,24 +41,23 @@ init_config() {
 			esac
 		done
 
-		while [ 1 ]; do
-			echo -n "What encryption cipher do you want to use? [$DEFAULT_CIPHER] "
-			read CIPHER
+		while [ -z "$CIPHER" ]; do
+			CIPHER=$(prompt "What encryption cipher do you want to use? [$DEFAULT_CIPHER]" "$DEFAULT_CIPHER")
 			[ -z "$CIPHER" ] && CIPHER="$DEFAULT_CIPHER"
 
 			local exists
 			exists=$(openssl list-cipher-commands | grep "$CIPHER")
-			[ $? -eq 0 ] && break
+			[ $? -eq 0 ] || CIPHER=""
 
-			echo "Error: Cipher '$CIPHER' is not available"
+			test -z "$CIPHER" && echo "Error: Cipher '$CIPHER' is not available"
 		done
 
 		echo -e "\nThis configuration will be stored:\n"
 		echo "salt:   $SALT"
 		echo "pass:   $PASS"
 		echo "cipher: $CIPHER"
-		echo -e -n "\nDoes this look right? [Y/n] "
-		read answer
+		echo
+		answer=$(prompt "Does this look right? [Y/n]" Y)
 
 		case "$answer" in
 			n*|N*)
@@ -75,8 +73,7 @@ init_config() {
 		esac
 	done
 
-	echo -n "Do you want to use .git/info/attributes? [Y/n] "
-	read answer
+	answer=$(prompt "Do you want to use .git/info/attributes? [Y/n]" Y)
 
 	local attrs
 	case "$answer" in
@@ -89,8 +86,7 @@ init_config() {
 	esac
 
 	local pattern
-	echo -n "What files do you want encrypted? [*] "
-	read pattern
+	pattern=$(prompt "What files do you want encrypted? [*]" "*")
 	[ -z "$pattern" ] && pattern="*"
 
 	echo "$pattern filter=encrypt diff=encrypt" >> $attrs
@@ -108,6 +104,19 @@ init_config() {
 	git config diff.encrypt.textconv "gitcrypt diff"
 }
 
+prompt() {
+	string="$1" ; shift
+	default="$1" ; shift
+
+	if [ "$OPTION_YES" -gt 0 -a -n "$default" ]; then
+		echo "$default"
+	else
+		echo -n "$string " > /dev/tty
+		read answer < /dev/tty
+		echo "$answer"
+	fi
+}
+
 _clean() {
 	# Encrypt using OpenSSL
 	openssl enc -base64 -$CIPHER -S "$SALT" -k "$PASS"
@@ -123,7 +132,18 @@ _diff() {
 	openssl enc -d -base64 -$CIPHER -k "$PASS" -in "$1" 2> /dev/null || cat "$1"
 }
 
-case "$1" in
+# Options processing.
+done=0
+while [ $# -gt 0 -a "$done" -eq 0 ]; do
+	case "$1" in
+		-y) OPTION_YES=1 ; shift ;;
+		 *) done=1 ;;
+	esac
+done
+
+command="$1" ; shift
+
+case "$command" in
 	clean|smudge|diff)
 		# Need a shared salt
 		SALT=$(git config gitcrypt.salt)
@@ -144,11 +164,11 @@ case "$1" in
 		[ -z "$CIPHER" ] && CIPHER="$DEFAULT_CIPHER"
 
 		# Execute command
-		_$1 "$2"
+		_$command "$@"
 		;;
 	init)
 		# Run setup commands
-		init_config
+		init_config "$@"
 		;;
 	version)
 		# Show version
@@ -156,10 +176,10 @@ case "$1" in
 		;;
 	*)
 		# Not a valid option
-    if [ -z "$1" ]; then
+    if [ -z "$command" ]; then
       echo "Gitcrypt: available options: init, version"
     else
-		  echo "Gitcrypt: command does not exist: $1"
+		  echo "Gitcrypt: command does not exist: $command"
     fi
 		exit 1
 		;;
