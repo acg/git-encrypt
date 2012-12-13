@@ -73,25 +73,27 @@ init_config() {
 		esac
 	done
 
-	answer=$(prompt "Do you want to use .git/info/attributes? [Y/n]" Y)
+	while [ -z "$ATTRS" ]; do
+		answer=$(prompt "Do you want to use .git/info/attributes? [Y/n]" Y)
 
-	local attrs
-	case "$answer" in
-		n*|N*)
-			attrs=".gitattributes"
-			;;
-		*)
-			attrs=".git/info/attributes"
-			;;
-	esac
+		case "$answer" in
+			n*|N*)
+				ATTRS=".gitattributes"
+				;;
+			*)
+				ATTRS=".git/info/attributes"
+				;;
+		esac
+	done
 
-	local pattern
-	pattern=$(prompt "What files do you want encrypted? [*]" "*")
-	[ -z "$pattern" ] && pattern="*"
+	while [ -z "$PATTERN" ]; do
+		PATTERN=$(prompt "What files do you want encrypted? [*]" "*")
+		[ -z "$PATTERN" ] && pattern="*"
+	done
 
-	echo "$pattern filter=encrypt diff=encrypt" >> $attrs
-	echo "[merge]" >> $attrs
-	echo "    renormalize=true" >> $attrs
+	echo "$PATTERN filter=encrypt diff=encrypt" >> "$ATTRS"
+	echo "[merge]" >> "$ATTRS"
+	echo "    renormalize=true" >> "$ATTRS"
 
 	# Encryption
 	git config gitcrypt.salt "$SALT"
