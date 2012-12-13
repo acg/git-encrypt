@@ -135,11 +135,10 @@ _diff() {
 }
 
 # Options processing.
-done=0
-while [ $# -gt 0 -a "$done" -eq 0 ]; do
+while [ $# -gt 0 ]; do
 	case "$1" in
 		-y) OPTION_YES=1 ; shift ;;
-		 *) done=1 ;;
+		 *) break ;;
 	esac
 done
 
