@@ -142,21 +142,9 @@ Or if you prefer to manually edit `.git/config`:
 To set up decryption from a clone, you will need to repeat the same setup on
 the new clone.
 
-First, clone the repository, but **do not perform a checkout**:
-
-    $ git clone -n git://github.com/johndoe/encrypted.get
+    $ git clone git://github.com/johndoe/encrypted.git
     $ cd encrypted
-
-> If you do a `git status` now, it will show all your files as being deleted.
-Do not fear, this is actually what we want right now, because we need to setup
-gitcrypt before doing a checkout.
-
-Now you can either run `gitcrypt init` or do the same manual configuration that
-performed on the original repository.
-
-Once configuration is complete, reset and checkout all the files:
-
-    $ git reset --hard HEAD
+    $ gitcrypt init
 
 All the files in the are now decrypted and ready to be edited.
 

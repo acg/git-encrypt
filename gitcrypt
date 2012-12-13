@@ -100,10 +100,19 @@ init_config() {
 	git config gitcrypt.pass "$PASS"
 	git config gitcrypt.cipher "$CIPHER"
 
-	# Filters
-	git config filter.encrypt.smudge "gitcrypt smudge"
-	git config filter.encrypt.clean "gitcrypt clean"
-	git config diff.encrypt.textconv "gitcrypt diff"
+	# List all unmodified matching files.
+	git ls-files -v -m -c "$PATTERN" |
+	sort -k2,2 -t' ' | uniq -s1 |
+	grep ^H | cut -f2,2 -d' ' |
+	(
+		# Apply filters
+		git config filter.encrypt.smudge "gitcrypt smudge"
+		git config filter.encrypt.clean "gitcrypt clean"
+		git config diff.encrypt.textconv "gitcrypt diff"
+
+		# Automatically unsmudge all unmodified matching files.
+		xargs git checkout
+	)
 }
 
 prompt() {
