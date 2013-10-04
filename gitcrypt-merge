@@ -1,0 +1,27 @@
+#!/bin/bash
+
+CURRENT="$1"
+BASE="$2"
+OTHER="$3"
+SIZE="$4"
+
+decrypt() {
+	FILE="$1"
+	cat "$FILE" | gitcrypt smudge > "$FILE".tmp || exit 1
+	cat "$FILE".tmp > "$FILE" && rm "$FILE".tmp
+}
+
+encrypt() {
+	FILE="$1"
+	cat "$FILE" | gitcrypt clean > "$FILE".tmp || exit 1
+	cat "$FILE".tmp > "$FILE" && rm "$FILE".tmp
+}
+
+decrypt "$CURRENT"
+decrypt "$BASE"
+decrypt "$OTHER"
+
+RET=$(git merge-file --marker-size $SIZE -L "CURRENT" -L "BASE" -L "OTHER" "$CURRENT" "$BASE" "$OTHER")
+
+encrypt "$CURRENT"
+exit $RET

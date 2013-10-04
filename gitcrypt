@@ -1,10 +1,39 @@
 #!/bin/bash
 
-readonly VERSION="0.3.0"
+readonly VERSION="0.3.2"
 readonly DEFAULT_CIPHER="aes-256-ecb"
+
+[ -z "$GIT_DIR" ] && GIT_DIR=".git"
+
+_disable() {
+	git config --unset filter.encrypt.smudge
+	git config --unset filter.encrypt.clean
+	git config --unset diff.encrypt.textconv
+	git config --unset merge.encrypt.name
+	git config --unset merge.encrypt.driver
+	git config --remove-section filter.encrypt
+	git config --remove-section diff.encrypt
+	git config --remove-section merge.encrypt
+	echo "git-encrypt filter disabled"
+}
+
+_enable() {
+	git config filter.encrypt.smudge "gitcrypt smudge"
+	git config filter.encrypt.clean "gitcrypt clean"
+	git config diff.encrypt.textconv "gitcrypt diff"
+	git config merge.encrypt.name "gitcrypt merge driver"
+	git config merge.encrypt.driver "gitcrypt-merge %A %O %B %L"
+	echo "git-encrypt filter enabled"
+}
 
 init_config() {
 	local answer
+
+	if [ ! -d "$GIT_DIR" ]; then
+		echo "Directory is not a git repository. Did you forget to run 'git init'?"
+		return 1
+	fi
+
 	while [ 1 ]; do
 		while [ -z "$SALT" ]; do
 			echo -n "Generate a random salt? [Y/n] "
@@ -37,7 +66,7 @@ init_config() {
 					read PASS
 					;;
 				*)
-					PASS=$(cat /dev/urandom | tr -dc '!@#$%^&*()_A-Z-a-z-0-9' | head -c32)
+					PASS=$(cat /dev/urandom | LC_ALL="C" tr -dc '!@#$%^&*()_A-Z-a-z-0-9' | head -c32)
 					;;
 			esac
 		done
@@ -75,7 +104,7 @@ init_config() {
 		esac
 	done
 
-	echo -n "Do you want to use .git/info/attributes? [Y/n] "
+	echo -n "Do you want to use $GIT_DIR/info/attributes? [Y/n] "
 	read answer
 
 	local attrs
@@ -84,7 +113,7 @@ init_config() {
 			attrs=".gitattributes"
 			;;
 		*)
-			attrs=".git/info/attributes"
+			attrs="$GIT_DIR/info/attributes"
 			;;
 	esac
 
@@ -93,38 +122,108 @@ init_config() {
 	read pattern
 	[ -z "$pattern" ] && pattern="*"
 
-	echo "$pattern filter=encrypt diff=encrypt" >> $attrs
+	echo "$pattern filter=encrypt diff=encrypt merge=encrypt" >> $attrs
 	echo "[merge]" >> $attrs
 	echo "    renormalize=true" >> $attrs
 
 	# Encryption
+	chmod 600 $GIT_DIR/config
 	git config gitcrypt.salt "$SALT"
 	git config gitcrypt.pass "$PASS"
 	git config gitcrypt.cipher "$CIPHER"
 
 	# Filters
-	git config filter.encrypt.smudge "gitcrypt smudge"
-	git config filter.encrypt.clean "gitcrypt clean"
-	git config diff.encrypt.textconv "gitcrypt diff"
+	_enable
+}
+
+take_pass_from_ssh() {
+	PRIVATE_KEY=`eval echo "${PASS}" 2> /dev/null`
+	if expr "$PRIVATE_KEY" : ".*\.pub" > /dev/null ; then
+		PRIVATE_KEY=`echo "$PRIVATE_KEY" | sed s/.pub//` 
+	else
+		PRIVATE_KEY=$PRIVATE_KEY
+	fi
+
+	if [[ -s "$PRIVATE_KEY" ]]; then
+		export GITCRYPT_KEY_ENCRYPTED="$PRIVATE_KEY"
+		PASS=`gitcrypt-restore-key` || exit 1
+		unset GITCRYPT_KEY_ENCRYPTED
+	fi
 }
 
 _clean() {
 	# Encrypt using OpenSSL
+	take_pass_from_ssh
 	openssl enc -base64 -$CIPHER -S "$SALT" -k "$PASS"
 }
 
 _smudge() {
 	# If decryption fails, use `cat` instead
+	take_pass_from_ssh
 	openssl enc -d -base64 -$CIPHER -k "$PASS" 2> /dev/null || cat
 }
 
 _diff() {
 	# If decryption fails, use `cat` instead
+	take_pass_from_ssh
 	openssl enc -d -base64 -$CIPHER -k "$PASS" -in "$1" 2> /dev/null || cat "$1"
 }
 
+_crypthistory_impl() {
+	_disable
+	git reset --hard
+	git filter-branch --prune-empty --tree-filter "git-encrypt-filter.sh $0 clean" -f
+	_enable
+	git reset --hard
+}
+
+_crypthistory() {
+	echo -n "You MUST run 'crypthistory' BEFORE any encrypted commits."
+	echo -n "Do you want to recrypt all history? This may corrut your data? [Y/n]"
+	read answer
+
+	case "$answer" in
+		n*|N*)
+			exit 0
+			;;
+		*)
+			echo "This may take a while depends on file sizes in repo..."
+			;;
+	esac
+
+	_crypthistory_impl
+}
+
+_decrypthistory() {
+	_disable
+	git reset --hard
+	git filter-branch --prune-empty --tree-filter "git-encrypt-filter.sh $0 smudge" -f
+	_enable
+	git reset --hard
+}
+
+_recrypt() {
+	echo -n "Do you want to change password and recrypt repo with new one? [Y/n]"
+	read answer
+
+	case "$answer" in
+		n*|N*)
+			exit 0
+			;;
+		*)
+			echo -n "Enter your passphrase: "
+			read PASS
+			;;
+	esac
+
+	_decrypthistory
+	git config gitcrypt.pass "$PASS"
+	chmod 600 $GIT_DIR/config
+	_crypthistory_impl
+}
+
 case "$1" in
-	clean|smudge|diff)
+	clean|smudge|diff|enable|disable|crypthistory|decrypthistory|recrypt)
 		# Need a shared salt
 		SALT=$(git config gitcrypt.salt)
 		if [ -z "$SALT" ]; then

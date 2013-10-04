@@ -1,0 +1,46 @@
+#!/usr/bin/env sh
+
+[ -z "$GIT_DIR" ] && GIT_DIR=".git"
+GIT_DIR=`readlink -e "$GIT_DIR"`
+
+[ -z "$GITCRYPT_KEY_ENCRYPTED" ] && GITCRYPT_KEY_ENCRYPTED=~/.ssh/id_rsa
+GITCRYPT_KEY_ENCRYPTED=`readlink -e "$GITCRYPT_KEY_ENCRYPTED"`
+
+[ -z "$GITCRYPT_KEY" ] && GITCRYPT_KEY=$GIT_DIR/key_decrypt.tmp
+
+
+GITCRYPT_ENCRYPTED_FILE=`eval echo ${GITCRYPT_KEY_ENCRYPTED} 2> /dev/null` || exit 1
+GITCRYPT_FILE=`eval echo ${GITCRYPT_KEY} 2> /dev/null` || exit 1
+
+decrypt_file() {
+	openssl rsa -in "$GITCRYPT_ENCRYPTED_FILE" | openssl dgst -sha512 | sed s/.*\ // > "$GITCRYPT_FILE" 2> /dev/null || (rm "$GITCRYPT_FILE" &> /dev/null && exit 1)
+
+	chmod 600 $GITCRYPT_FILE &> /dev/null || exit 1
+
+	export GITCRYPT_TIMER="30"
+	export GITCRYPT_TIMEOUT="40"
+	setsid sh -c "gitcrypt-watchdog \"$GITCRYPT_FILE\" &" &> /dev/null
+}
+
+if [ ! -s "$GITCRYPT_FILE" ]; then
+	decrypt_file
+else
+	# try to deted lost(unwatched) file, for example when crash occured
+	DANGLING="120"
+
+	AGE=$((`date +%s` - `stat -c %Z "$GITCRYPT_FILE"`))
+	if (( "$AGE" > "$DANGLING" )); then
+		rm -f "$GITCRYPT_FILE" &> /dev/null
+		decrypt_file
+	else
+		touch -c "$GITCRYPT_FILE"
+	fi
+fi
+
+if [ -s "$GITCRYPT_FILE" ]; then
+	cat $GITCRYPT_FILE || exit 1
+	exit 0
+else
+	exit 1
+fi
+

@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+
+# watch for the file, delete them on error
+# or when unsued for TIMEOUT seconds
+
+WATCH_FILE="$1"
+[ -z "$WATCH_FILE" ] && exit 1
+[ -s "$WATCH_FILE" ] || exit 1
+
+trap "exit 0" INT
+trap "exit 0" TERM
+trap "rm -f \"$WATCH_FILE\" &> /dev/null; exit 0" EXIT
+
+[ -z "$GITCRYPT_TIMER" ] && GITCRYPT_TIMER="30"
+[ -z "$GITCRYPT_TIMEOUT" ] && GITCRYPT_TIMEOUT="40"
+
+
+while ((1)); do
+	AGE=$((`date +%s` - `stat -c %Z "$WATCH_FILE"`))
+	if (( "$AGE" > "$GITCRYPT_TIMEOUT" )); then
+		#file will removed
+		exit 0
+	fi
+	sleep "$GITCRYPT_TIMER"s
+done
+
